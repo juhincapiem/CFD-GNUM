@@ -1,0 +1,15 @@
+Variable,   Value,   Description 
+domainL,    0.8e0 ,  Longitud total del dominio
+flowVelU,   0.8e0,   Velocidad de flujo en direccion X
+decayTau,   1.0E-1,    Rata de decaimiento de P
+valPQAtL,   0.5E0,     Cantidad de P y Q en x=L
+nNodesX,    101,     Numero de nodos en direccion X
+meshExpRat, 0.9,    Relacion de expansion local de malla
+realSimTime,3.0,    Tiempo total de simulacion (con dimensiones)
+realDeltaT, 1E-5	,     Paso de tiempo (con dimensiones)
+nPlots,     8,       Numero de graficas a producir
+posSPeak,   0.1,    Posicion pico maximo de S (como fraccion de longitud total) 
+maxS,       3.5E0,  Maximo valor de termino fuente S.
+sigmaS,     3.5E-2, Dispersion gaussiana de termino fuente S 
+minDiffVal, 9.0E-2, Minimo valor del coeficiente difusivo
+

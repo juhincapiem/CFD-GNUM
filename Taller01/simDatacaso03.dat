@@ -1,0 +1,12 @@
+Variable,   Value,   Description 
+Nx,         80.0e0,  nodos en x
+Ny,         17.0e0,  nodos en y
+kx,         1.0e0,   parametro espacial x
+ky,         1.0e0,   parametro espacial y
+deltaTdim,  2.0e-2,  paso de tiempo
+x0,	    8.0e0,   coordenada x de Sx y Sy
+y0, 	    2.0e0,   coordenada y de Sx y Sy
+w, 	    1.0e-2,   frecuencia angular
+tau,        1.0e2,   tiempo caracteristico
+Lc,         15.707e0,   longitud caracteristico
+Uc,         15.707e0,   velocidad caracteristico

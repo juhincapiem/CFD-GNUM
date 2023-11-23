@@ -1,0 +1,450 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from cycler import cycler
+from icecream import ic
+
+#Parámetros del dominio
+domainX = np.float64(5.0*np.pi)
+domainY = np.float64(1.0*np.pi)
+totalSimTime = 1.0
+
+# Lectura de datos entrada
+simData = pd.read_csv("simDatacaso03.dat")
+simData.to_numpy()
+simData.columns = simData.columns.str.strip()
+simData.set_index('Variable',inplace=True)
+print(simData)
+Nx  = np.int64(simData.loc['Nx']['Value'])
+Ny  = np.int64(simData.loc['Ny']['Value'])
+kx  = np.float64(simData.loc['kx']['Value'])
+ky  = np.float64(simData.loc['ky']['Value'])
+deltaTdim  = np.float64(simData.loc['deltaTdim']['Value'])
+x0  = np.float64(simData.loc['x0']['Value'])
+y0  = np.float64(simData.loc['y0']['Value'])
+w  = np.float64(simData.loc['w']['Value'])
+tau  = np.float64(simData.loc['tau']['Value'])
+Lc  = np.float64(simData.loc['Lc']['Value'])
+Uc  = np.float64(simData.loc['Uc']['Value'])
+
+#Tamaño de la malla
+deltaX = np.float64(domainX/(Nx-1))
+deltaY = np.float64(domainY/(Ny-1))
+
+#Creo matrices para almacenar las componentes de la velocidad
+# en el presente y en el futuro 
+uPre = np.ones((Ny,Nx), dtype= np.float64)
+vPre = np.ones((Ny,Nx), dtype= np.float64)
+uFut = np.ones((Ny,Nx), dtype= np.float64)
+vFut = np.ones((Ny,Nx), dtype= np.float64)
+
+#Creo matrices y vectores para almacenar la solución
+#Número de incógnitas en el problema (se resta la info de la frontera)
+unknownX = np.int64(Nx-2)
+unknownY = np.int64(Ny-2)
+N = np.int64((unknownX)*(unknownY)) 
+A = np.zeros((N, N), dtype= np.float64)
+BC1 = np.zeros((N, 1), dtype= np.float64)
+BC2 = np.zeros((N, 1), dtype= np.float64)
+vectUFut = np.zeros((N, 1), dtype=np.float64)
+vectVFut = np.zeros((N, 1), dtype=np.float64)
+
+#Introduzco un conjunto de índices para la malla al estilo Hans Petter
+Ix = range(Nx)
+Iy = range(Ny)
+
+#Adimensionalizo el tiempo
+deltaTnonDim = np.float64(deltaTdim/tau)
+nonDimSimTime = np.float64(totalSimTime/tau)
+nTsteps = np.int64(nonDimSimTime/deltaTnonDim + 1.0E0)
+#Adimensionalizo el espacio
+deltaXnonDim = np.float64(deltaX/Lc)
+deltaYnonDim = np.float64(deltaY/Lc)
+
+#----------------------------------------------------------------
+#Vectores que me servirán para graficar 
+nTotalPointsX = np.int64(Nx)
+nTotalPointsY = np.int64(Ny)
+positionsX = np.zeros(nTotalPointsX, dtype= np.float64)
+positionsY = np.zeros(nTotalPointsY, dtype= np.float64)
+timeFraction = np.zeros(nTsteps, dtype= np.float64)
+
+for i in range(1,nTotalPointsX):
+  positionsX[i] = positionsX[i-1] + deltaX
+
+for i in range(1,nTotalPointsY):
+  positionsY[i] = positionsY[i-1] + deltaY
+
+for i in range(1, nTsteps):
+  timeFraction[i] = timeFraction[i-1] + deltaTdim
+
+positionsXNonDim = positionsX/Lc
+positionsYNonDim = positionsY/Lc
+timeFractionNonDim = timeFraction/tau
+#----------------------------------------------------------------
+
+#Constantes del problema
+k1 = np.float64(Uc*tau/Lc)
+k2 = np.float64(tau/Uc)
+alfa = np.float64(deltaTnonDim*k1/(4*deltaXnonDim))
+beta = np.float64(deltaTnonDim*k1/(4*deltaYnonDim))
+gamma = np.float64(deltaTnonDim*k2/2)
+
+
+#Condiciones iniciales
+"""
+beginX = np.int64((np.pi)/deltaX + 1)
+endX = np.int64((3*np.pi/2)/deltaX + 1)
+beginY = np.int64((np.pi/3)/deltaY + 1)
+endY = np.int64((2*np.pi/3)/deltaY + 1)
+uPre[beginY:endY+1, beginX:endX+1] = 2
+vPre[beginY:endY+1, beginX:endX+1] = 2
+"""
+#Adimensionalizo las condiciones iniciales
+uPre = uPre/Uc  
+vPre = vPre/Uc
+
+#Matrices para almacenar u y v vs tiempo, para cinco posiciones nodales
+vectorUtiempo = np.ones((5,nTsteps), dtype= np.float64)
+vectorVtiempo = np.ones((5,nTsteps), dtype= np.float64)
+
+#Matrices para almacenar u y v vs tiempo, para cinco posiciones nodales
+vectorUespacio = np.ones((15, Nx), dtype= np.float64)
+vectorVespacio = np.ones((15, Nx), dtype= np.float64)
+
+#Posiciones nodales
+posX = np.array([1.0*np.pi, 2*np.pi, 3.0*np.pi, 4.0*np.pi, 4.5*np.pi])
+posy = np.pi/4
+posy2 = np.array([np.pi/4, np.pi/3, np.pi/2])
+tiempoG = np.array([totalSimTime*0.1, totalSimTime*0.2, totalSimTime*0.4, totalSimTime*0.5, totalSimTime*0.8])
+contador = 0
+
+def uFutCN(Iy, Ix, unknownX, unknownY, alfa, beta, uPre, vPre):
+    N = np.int64((unknownX)*(unknownY)) 
+    A = np.zeros((N, N), dtype= np.float64)
+    Bc1 = np.zeros((N, 1), dtype= np.float64)
+    Bc2 = np.zeros((N, 1), dtype= np.float64)
+    eqGlobal= 0    #Número de incógnitas globales
+    for j in Iy[1:-1]:
+        for i in Ix[1:-1]:
+            #Línea izquierda
+            if  i == 1:
+                Bc1[eqGlobal] = np.float64(-alfa*uPre[j,i]*uPre[j, i-1])
+            #Línea inferior
+            if j == 1:
+                Bc2[eqGlobal] = np.float64(-beta*vPre[j,i]*uPre[j-1, i])
+            #Línea derecha
+            if i == unknownX:
+                Bc1[eqGlobal] = np.float64(alfa*uPre[j,i]*uPre[j, i+1])
+            #Línea superior
+            if j == unknownY:
+                Bc2[eqGlobal] = np.float64(beta*vPre[j,i]*uPre[j+1, i])
+            A[eqGlobal, eqGlobal] = 1
+            if j < unknownY:
+                A[eqGlobal, eqGlobal+(unknownX)] = beta*vPre[j,i]
+            if i < unknownX:
+                A[eqGlobal, eqGlobal+1] = alfa*uPre[j,i]
+            if j > 1:
+                A[eqGlobal, eqGlobal-(unknownX)] = -beta*vPre[j,i]
+            if i > 1:
+                A[eqGlobal, eqGlobal-1] = -alfa*uPre[j,i]
+            eqGlobal += 1
+            
+    return A, Bc1, Bc2
+
+def vFutCN(Iy, Ix, unknownX, unknownY, alfa, beta, uPre, vPre):
+    N = np.int64((unknownX)*(unknownY)) 
+    A = np.zeros((N, N), dtype= np.float64)
+    Bc1 = np.zeros((N, 1), dtype= np.float64)
+    Bc2 = np.zeros((N, 1), dtype= np.float64)
+    eqGlobal= 0    #Número de incógnitas globales
+    for j in Iy[1:-1]:
+        for i in Ix[1:-1]:
+            #Línea izquierda
+            if  i == 1:
+                Bc1[eqGlobal] = np.float64(-alfa*uPre[j,i]*vPre[j, i-1])
+            #Línea inferior
+            if j == 1:
+                Bc2[eqGlobal] = np.float64(-beta*vPre[j,i]*vPre[j-1, i])
+            #Línea derecha
+            if i == unknownX:
+                Bc1[eqGlobal] = np.float64(alfa*uPre[j,i]*vPre[j, i+1])
+            #Línea superior
+            if j == unknownY:
+                Bc2[eqGlobal] = np.float64(beta*vPre[j,i]*vPre[j+1, i])
+
+            A[eqGlobal, eqGlobal] = 1
+            if j < unknownY:
+                A[eqGlobal, eqGlobal+(unknownX)] = beta*vPre[j,i]
+            if i < unknownX:
+                A[eqGlobal, eqGlobal+1] = alfa*uPre[j,i]
+            if j > 1:
+                A[eqGlobal, eqGlobal-(unknownX)] = -beta*vPre[j,i]
+            if i > 1:
+                A[eqGlobal, eqGlobal-1] = -alfa*uPre[j,i]
+            eqGlobal += 1
+    return A, Bc1, Bc2
+
+def uPreCN(alfa, beta, uPre, vPre, N):
+    Vect = np.zeros((N, 1), dtype= np.float64)
+    Vect[:] = np.reshape(alfa*uPre[1:-1,1:-1]*uPre[1:-1,:-2] + beta*vPre[1:-1,1:-1]*uPre[:-2, 1:-1] \
+        + uPre[1:-1,1:-1] - alfa*uPre[1:-1,1:-1]*uPre[1:-1,2:] - beta*vPre[1:-1,1:-1]*uPre[2:, 1:-1], (N,1))
+    return Vect
+
+def vPreCN(alfa, beta, uPre, vPre, N):
+    Vect = np.zeros((N, 1), dtype= np.float64)
+    Vect[:] = np.reshape(alfa*uPre[1:-1,1:-1]*vPre[1:-1,:-2] + beta*vPre[1:-1,1:-1]*vPre[:-2, 1:-1] \
+        + vPre[1:-1,1:-1] - alfa*uPre[1:-1,1:-1]*vPre[1:-1,2:] - beta*vPre[1:-1,1:-1]*vPre[2:, 1:-1], (N,1))
+    return Vect
+
+def sourceX(N, w, x0, y0, kx, ky, t, deltaTdim, positionsX, positionsY):
+    X, Y = np.meshgrid(positionsX[1:-1], positionsY[1:-1])
+    SxPre = np.zeros((N, 1), dtype= np.float64)
+    SxFut = np.zeros((N,1), dtype= np.float64)
+    SxPre[:] = np.reshape(2*np.exp(-(X-x0)**2/kx-(Y-y0)**2/ky)*np.sin(2*w*timeFraction[t]), (N,1))
+    SxFut[:] = np.reshape(2*np.exp(-(X-x0)**2/kx-(Y-y0)**2/ky)*np.sin(2*w*(timeFraction[t]+deltaTdim)), (N,1))
+    return SxPre, SxFut
+
+def sourceY(N, w, y0, ky, t, deltaTdim, positionsX, positionsY):
+    X, Y = np.meshgrid(positionsX[1:-1], positionsY[1:-1])
+    SyPre = np.zeros((N, 1), dtype= np.float64)
+    SyFut = np.zeros((N,1), dtype= np.float64)
+    SyPre[:] = np.reshape(2*np.exp(-(Y-y0)**2/ky)*np.cos(0.3*w*timeFraction[t]), (N,1))
+    SyFut[:] = np.reshape(2*np.exp(-(Y-y0)**2/ky)*np.cos(0.3*w*(timeFraction[t]+deltaTdim)), (N,1))
+    return SyPre, SyFut
+
+def uCorrection(Iy, Ix, unknownX, unknownY, alfa, beta, uFut, vFut):
+
+    N = np.int64((unknownX)*(unknownY)) 
+    A = np.zeros((N, N), dtype= np.float64)
+    Bc1 = np.zeros((N, 1), dtype= np.float64)
+    Bc2 = np.zeros((N, 1), dtype= np.float64)
+    eqGlobal= 0    #Número de incógnitas globales
+    for j in Iy[1:-1]:
+        for i in Ix[1:-1]:
+            #Línea izquierda
+            if  i == 1:
+                Bc1[eqGlobal] = np.float64(-alfa*uFut[j,i]*uFut[j, i-1])
+            #Línea inferior
+            if j == 1:
+                Bc2[eqGlobal] = np.float64(-beta*vFut[j,i]*uFut[j-1, i])
+            #Línea derecha
+            if i == unknownX:
+                Bc1[eqGlobal] = np.float64(alfa*uFut[j,i]*uFut[j, i+1])
+            #Línea superior
+            if j == unknownY:
+                Bc2[eqGlobal] = np.float64(beta*vFut[j,i]*uFut[j+1, i])
+            A[eqGlobal, eqGlobal] = 1
+            if j < unknownY:
+                A[eqGlobal, eqGlobal+(unknownX)] = beta*vFut[j,i]
+            if i < unknownX:
+                A[eqGlobal, eqGlobal+1] = alfa*uFut[j,i]
+            if j > 1:
+                A[eqGlobal, eqGlobal-(unknownX)] = -beta*vFut[j,i]
+            if i > 1:
+                A[eqGlobal, eqGlobal-1] = -alfa*uFut[j,i]
+            eqGlobal += 1
+            
+    return A, Bc1, Bc2
+
+def vCorrection(Iy, Ix, unknownX, unknownY, alfa, beta, uFut, vFut):
+    N = np.int64((unknownX)*(unknownY)) 
+    A = np.zeros((N, N), dtype= np.float64)
+    Bc1 = np.zeros((N, 1), dtype= np.float64)
+    Bc2 = np.zeros((N, 1), dtype= np.float64)
+    eqGlobal= 0    #Número de incógnitas globales
+    for j in Iy[1:-1]:
+        for i in Ix[1:-1]:
+            #Línea izquierda
+            if  i == 1:
+                Bc1[eqGlobal] = np.float64(-alfa*uFut[j,i]*vFut[j, i-1])
+            #Línea inferior
+            if j == 1:
+                Bc2[eqGlobal] = np.float64(-beta*vFut[j,i]*vFut[j-1, i])
+            #Línea derecha
+            if i == unknownX:
+                Bc1[eqGlobal] = np.float64(alfa*uFut[j,i]*vFut[j, i+1])
+            #Línea superior
+            if j == unknownY:
+                Bc2[eqGlobal] = np.float64(beta*vFut[j,i]*vFut[j+1, i])
+
+            A[eqGlobal, eqGlobal] = 1
+            if j < unknownY:
+                A[eqGlobal, eqGlobal+(unknownX)] = beta*vFut[j,i]
+            if i < unknownX:
+                A[eqGlobal, eqGlobal+1] = alfa*uFut[j,i]
+            if j > 1:
+                A[eqGlobal, eqGlobal-(unknownX)] = -beta*vFut[j,i]
+            if i > 1:
+                A[eqGlobal, eqGlobal-1] = -alfa*uFut[j,i]
+            eqGlobal += 1
+    return A, Bc1, Bc2
+
+for t in range(1, nTsteps):
+    matAU, Bc1Ualfa, Bc2Ubeta = uFutCN(Iy, Ix, unknownX, unknownY, alfa, beta, uPre, vPre)
+    matAV, Bc1Valfa, Bc2Vbeta = vFutCN(Iy, Ix, unknownX, unknownY, alfa, beta, uPre, vPre)
+    vectUPres = uPreCN(alfa, beta, uPre, vPre, N)
+    vectVPres = vPreCN(alfa, beta, uPre, vPre, N)
+    SxPre, SxFut = sourceX(N, w, x0, y0, kx, ky, t, deltaTdim, positionsX, positionsY)
+    SyPre, SyFut = sourceY(N, w, y0, ky, t, deltaTdim, positionsX, positionsY)
+
+    vectUFut[:] = np.dot(np.linalg.inv(matAU), vectUPres + 0.0*gamma*(SxPre+SxFut) - Bc1Ualfa - Bc2Ubeta)
+    vectVFut[:] = np.dot(np.linalg.inv(matAV), vectVPres + 0.0*gamma*(SyPre+SyFut) - Bc1Valfa - Bc2Vbeta)
+
+    uFut[1:-1,1:-1] = np.reshape(vectUFut, (unknownY, unknownX))
+    vFut[1:-1,1:-1] = np.reshape(vectVFut, (unknownY, unknownX))
+
+    for k in range(1, 3):
+        matAU, Bc1Ualfa, Bc2Ubeta = uCorrection(Iy, Ix, unknownX, unknownY, alfa, beta, uFut, vFut)
+        matAV, Bc1Valfa, Bc2Vbeta = vCorrection(Iy, Ix, unknownX, unknownY, alfa, beta, uFut, vFut)
+        vectUPres = uPreCN(alfa, beta, uPre, vPre, N)
+        vectVPres = vPreCN(alfa, beta, uPre, vPre, N)
+        SxPre, SxFut = sourceX(N, w, x0, y0, kx, ky, t, deltaTdim, positionsX, positionsY)
+        SyPre, SyFut = sourceY(N, w, y0, ky, t, deltaTdim, positionsX, positionsY)
+
+        vectUFut[:] = np.dot(np.linalg.inv(matAU), vectUPres + gamma*(SxPre+SxFut) - Bc1Ualfa - Bc2Ubeta)
+        vectVFut[:] = np.dot(np.linalg.inv(matAV), vectVPres + gamma*(SyPre+SyFut) - Bc1Valfa - Bc2Vbeta)
+
+        uFut[1:-1,1:-1] = np.reshape(vectUFut, (unknownY, unknownX))
+        vFut[1:-1,1:-1] = np.reshape(vectVFut, (unknownY, unknownX))
+
+    uPre[1:-1,1:-1] = uFut[1:-1,1:-1]
+    vPre[1:-1,1:-1] = vFut[1:-1,1:-1]
+    #Almacenar para al menos cinco posiciones temporales
+    for data in range(5):
+        vectorUtiempo[data, t-1] = uPre[np.int64(posy/deltaY + 1), np.int64(posX[data]/deltaX + 1)]
+        vectorVtiempo[data, t-1] = vPre[np.int64(posy/deltaY + 1), np.int64(posX[data]/deltaX + 1)]
+
+    #Almacenar para al menos cinco posiciones espaciales
+    if  int(tiempoG[contador]/deltaTdim) == t:
+        vectorUespacio[3*contador, :] = uPre[np.int64(posy2[0]/deltaY + 1), :]
+        vectorUespacio[1+3*contador, :] = uPre[np.int64(posy2[1]/deltaY + 1), :]
+        vectorUespacio[2+3*contador, :] = uPre[np.int64(posy2[2]/deltaY + 1), :]
+
+        vectorVespacio[3*contador, :] = vPre[np.int64(posy2[0]/deltaY + 1), :]
+        vectorVespacio[1+3*contador, :] = vPre[np.int64(posy2[1]/deltaY + 1), :]
+        vectorVespacio[2+3*contador, :] = vPre[np.int64(posy2[2]/deltaY + 1), :]
+        contador += 1
+        if contador == 5:
+            contador = 0
+
+
+    if t == round(nTsteps*0.25):
+        print("25% of simulation done")
+    elif t == round(nTsteps*0.50):
+        print("50% of simulation done")
+    elif t == round(nTsteps*0.75):
+        print("75% of simulation done")
+
+font = {'weight' : 'bold',
+        'size'   : 8}
+
+plt.rc('font', **font)
+#---------------------------------------------------------------------
+fig1, ax1 = plt.subplots(5,1, figsize=(10,8), sharex = True)
+for data in range(5):
+    ax1[data].plot(timeFraction, Uc*vectorUtiempo[data, :], "--r")
+    ax1[data].set_ylabel("u [m/s], X={:.3f}".format(posX[data]))
+    ax1[data].grid("True") 
+fig1.suptitle('Perfil de velocidad u para cinco posiciones nodales en $Y=${:.4f} vs tiempo\n\
+              $N_x=${:.1f}, $N_y=${:.1f}, $k_x=${:.2f}, $k_y=${:.2f}, $\omega=${:.3f}'.format(posy,Nx,Ny,kx,ky,w))
+ax1[data].set_xlabel("Tiempo [s]")
+
+
+fig2, ax2 = plt.subplots(5,1, figsize=(10,8), sharex = True)
+for data in range(5):
+    ax2[data].plot(timeFraction, Uc*vectorVtiempo[data, :], "--r")
+    ax2[data].set_ylabel("v [m/s], X={:.3f}".format(posX[data]))
+    ax2[data].grid("True") 
+fig2.suptitle('Perfil de velocidad v para cinco posiciones nodales en Y={:.4f} vs tiempo\n\
+              $N_x=${:.1f}, $N_y=${:.1f}, $k_x=${:.2f}, $k_y=${:.2f}, $\omega=${:.3f}'.format(posy,Nx,Ny,kx,ky,w))
+ax2[data].set_xlabel("Tiempo [s]")
+
+
+#---------------------------------------------------------------------
+fig3, ax3 = plt.subplots(5,1, figsize=(10,8), sharex = True)
+contadorAux = 0
+for data in range(5):
+    ax3[data].plot(positionsX, vectorUespacio[3*contadorAux, :])
+    ax3[data].set_ylabel("u [m/s]")
+    ax3[data].grid("True")
+    contadorAux += 1
+fig3.suptitle('Perfil de velocidad u vs x en Y={:.4f} en t={:.3f} s,{:.3f} s,{:.3f} s, {:.3f}s y {:.3f} s \n\
+              $N_x=${:.1f}, $N_y=${:.1f}, $k_x=${:.2f}, $k_y=${:.2f}, $\omega=${:.3f}'\
+              .format(posy2[0], tiempoG[0], tiempoG[1], tiempoG[2], tiempoG[3], tiempoG[4], Nx,Ny,kx,ky,w))
+ax3[data].set_xlabel("x [m]")
+
+
+fig4, ax4 = plt.subplots(5,1, figsize=(10,8), sharex = True)
+contadorAux = 0
+for data in range(5):
+    ax4[data].plot(positionsX, vectorUespacio[1+3*contadorAux, :])
+    ax4[data].set_ylabel("u [m/s]")
+    ax4[data].grid("True")
+    contadorAux += 1
+fig4.suptitle('Perfil de velocidad u vs x en Y={:.4f} en t={:.3f} s,{:.3f} s,{:.3f} s, {:.3f}s y {:.3f} s \n\
+              $N_x=${:.1f}, $N_y=${:.1f}, $k_x=${:.2f}, $k_y=${:.2f}, $\omega=${:.3f}'\
+              .format(posy2[1], tiempoG[0], tiempoG[1], tiempoG[2], tiempoG[3], tiempoG[4], Nx,Ny,kx,ky,w))
+ax4[data].set_xlabel("x [m]")
+
+
+fig5, ax5 = plt.subplots(5,1,figsize=(10,8), sharex = True)
+contadorAux = 0
+for data in range(5):
+    ax5[data].plot(positionsX, vectorUespacio[2+3*contadorAux, :])
+    ax5[data].set_ylabel("u [m/s]")
+    ax5[data].grid("True")
+    contadorAux += 1
+fig5.suptitle('Perfil de velocidad u vs x en Y={:.4f} en t={:.3f} s,{:.3f} s,{:.3f} s, {:.3f}s y {:.3f} s \n\
+              $N_x=${:.1f}, $N_y=${:.1f}, $k_x=${:.2f}, $k_y=${:.2f}, $\omega=${:.3f}'\
+              .format(posy2[2], tiempoG[0], tiempoG[1], tiempoG[2], tiempoG[3], tiempoG[4], Nx,Ny,kx,ky,w))
+ax5[data].set_xlabel("x [m]")
+
+#---------------------------------------------------------------------
+#---------------------------------------------------------------------
+fig6, ax6 = plt.subplots(5,1, figsize=(10,8), sharex = True)
+contadorAux = 0
+for data in range(5):
+    ax6[data].plot(positionsX, vectorUespacio[3*contadorAux, :])
+    ax6[data].set_ylabel("v [m/s]")
+    ax6[data].grid("True")
+    contadorAux += 1
+fig6.suptitle('Perfil de velocidad v vs x en Y={:.4f} en t={:.3f} s,{:.3f} s,{:.3f} s, {:.3f}s y {:.3f} s \n\
+              $N_x=${:.1f}, $N_y=${:.1f}, $k_x=${:.2f}, $k_y=${:.2f}, $\omega=${:.3f}'\
+              .format(posy2[0], tiempoG[0], tiempoG[1], tiempoG[2], tiempoG[3], tiempoG[4], Nx,Ny,kx,ky,w))
+ax6[data].set_xlabel("x [m]")
+
+
+fig7, ax7 = plt.subplots(5,1, figsize=(10,8), sharex = True)
+contadorAux = 0
+for data in range(5):
+    ax7[data].plot(positionsX, vectorUespacio[1+3*contadorAux, :])
+    ax7[data].set_ylabel("v [m/s]")
+    ax7[data].grid("True")
+    contadorAux += 1
+fig7.suptitle('Perfil de velocidad v vs x en Y={:.4f} en t={:.3f} s,{:.3f} s,{:.3f} s, {:.3f}s y {:.3f} s \n\
+              $N_x=${:.1f}, $N_y=${:.1f}, $k_x=${:.2f}, $k_y=${:.2f}, $\omega=${:.3f}'\
+              .format(posy2[1], tiempoG[0], tiempoG[1], tiempoG[2], tiempoG[3], tiempoG[4], Nx,Ny,kx,ky,w))
+ax7[data].set_xlabel("x [m]")
+
+fig8, ax8 = plt.subplots(5,1,figsize=(10,8), sharex = True)
+contadorAux = 0
+for data in range(5):
+    ax8[data].plot(positionsX, vectorUespacio[2+3*contadorAux, :])
+    ax8[data].set_ylabel("v [m/s]")
+    ax8[data].grid("True")
+    contadorAux += 1
+fig8.suptitle('Perfil de velocidad v vs x en Y={:.4f} en t={:.3f} s,{:.3f} s,{:.3f} s, {:.3f}s y {:.3f} s \n\
+              $N_x=${:.1f}, $N_y=${:.1f}, $k_x=${:.2f}, $k_y=${:.2f}, $\omega=${:.3f}'\
+              .format(posy2[2], tiempoG[0], tiempoG[1], tiempoG[2], tiempoG[3], tiempoG[4], Nx,Ny,kx,ky,w))
+ax8[data].set_xlabel("x [m]")
+
+#---------------------------------------------------------------------
+fig1.savefig("punto03/ut01-4.png")
+fig2.savefig("punto03/vt01-4.png")
+fig3.savefig("punto03/uY01-4.png")
+fig4.savefig("punto03/uY02-4.png")
+fig5.savefig("punto03/uY03-4.png")
+fig6.savefig("punto03/vY01-4.png")
+fig7.savefig("punto03/vY02-4.png")
+fig7.savefig("punto03/vY03-4.png")
